@@ -1,0 +1,4 @@
+# gradio is installed by Hugging Face from `sdk_version` in README.md (add it here for local installs).
+openai>=1.40
+python-dotenv>=1.0
+pydantic>=2
