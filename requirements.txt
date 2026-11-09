@@ -2,3 +2,5 @@
 openai>=1.40
 python-dotenv>=1.0
 pydantic>=2
+# Needed only on a ZeroGPU Space (see app.py); harmless elsewhere.
+spaces
