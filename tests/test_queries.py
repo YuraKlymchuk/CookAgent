@@ -73,7 +73,7 @@ def test_sampling_is_random_but_reproducible_with_seed(connection):
 
 
 def test_empty_result_carries_a_hint_that_protects_safety_filters(connection):
-    result = search(connection, diets=["vegan"], main_ingredient="seafood")
+    result = search(connection, diets=["vegan"], include_ingredients=["chicken"])
     assert result["total_matches"] == 0 and result["recipes"] == []
     assert "never drop diet/allergy" in result["hint"]
 
@@ -124,3 +124,66 @@ def test_get_recipe_unknown_id(connection):
 def test_database_is_read_only(connection):
     with pytest.raises(sqlite3.OperationalError):
         connection.execute("INSERT INTO meta (key, value) VALUES ('x', 'y')")
+
+
+def test_cards_by_ids_keeps_requested_order_and_drops_unknown_ids(connection):
+    cards = queries.cards_by_ids(connection, [3, 1, 9999, 3])
+    assert [c["id"] for c in cards] == [3, 1]
+    assert queries.cards_by_ids(connection, []) == []
+
+
+# ---- relaxation by priority ---------------------------------------------------------
+
+def test_ingredients_that_never_occur_together_fall_back_to_best_partial_match(connection):
+    # No recipe has chicken, soy sauce and noodles together; keep the taste filter.
+    result = search(connection, include_ingredients=["chicken", "soy sauce", "noodles"], tastes=["spicy"])
+
+    assert result["relaxed"] == ["include_ingredients"]
+    assert "No recipe contains all of: chicken, soy sauce, noodle" in result["note"]
+    assert titles(result) == {"Peanut Noodles"}  # the only spicy recipe; has soy sauce + noodles
+    assert result["recipes"][0]["matched_ingredients"] == 2  # "soy sauce" counts once, not twice
+
+
+def test_partial_matches_are_ordered_by_ingredient_coverage(connection):
+    result = search(connection, include_ingredients=["chicken", "garlic", "rice", "shrimp"], limit=10)
+
+    matched = [r["matched_ingredients"] for r in result["recipes"]]
+    assert matched == sorted(matched, reverse=True)
+    assert result["recipes"][0]["title"] == "Chicken Rice Bowl"  # chicken + garlic + rice = 3
+
+
+def test_soft_criteria_are_dropped_in_priority_order_after_ingredients(connection):
+    # nothing cooks in 10 minutes, so ingredients go partial first and then time is dropped
+    result = search(connection, include_ingredients=["chicken", "garlic"], max_total_min=10, difficulty="hard")
+
+    assert result["relaxed"] == ["include_ingredients", "difficulty", "max_total_min"]
+    assert result["recipes"][0]["matched_ingredients"] == 2
+
+
+def test_taste_is_relaxed_before_time_and_time_is_kept_when_that_is_enough(connection):
+    result = search(connection, tastes=["bitter"], max_total_min=20)
+
+    assert result["relaxed"] == ["tastes"]
+    assert result["note"] == "Ignored because nothing matched them: tastes."
+    assert all(r["total_min"] <= 20 for r in result["recipes"])
+
+
+def test_nothing_is_reported_as_relaxed_when_the_strict_search_works(connection):
+    strict = search(connection, include_ingredients=["chicken", "garlic"])
+    assert "relaxed" not in strict and "note" not in strict
+
+
+def test_diets_are_never_relaxed(connection):
+    assert search(connection, diets=["vegan"], include_ingredients=["chicken"])["total_matches"] == 0
+
+    result = search(connection, diets=["vegan"], include_ingredients=["chicken", "garlic"])
+    assert result["relaxed"] == ["include_ingredients"]
+    assert titles(result) == {"Mushroom Soup"}  # garlic only, but still vegan
+
+
+def test_excluded_ingredients_are_never_relaxed(connection):
+    assert search(connection, include_ingredients=["peanut"], exclude_ingredients=["peanut"])["total_matches"] == 0
+
+    result = search(connection, include_ingredients=["peanut", "garlic"], exclude_ingredients=["peanut"])
+    assert "Peanut Noodles" not in titles(result)
+    assert result["recipes"]  # still finds garlic recipes, just never one with peanut

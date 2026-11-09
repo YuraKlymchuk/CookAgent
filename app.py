@@ -1,10 +1,22 @@
 """CookAgent entry point (Hugging Face Space: ``app_file: app.py``)."""
 
+import logging
+import os
+
 from agent.llm import server_api_key
 from agent.rate_limit import RateLimiter
 from agent.tools import ToolBox
 from agent.ui import build_demo
 from data_load import ensure_database, open_readonly
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Tool calls are logged by the "cookagent.*" loggers; keep library chatter out of the way.
+for noisy in ("httpx", "httpcore", "openai"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 
 # Runs on every start: builds data/recipes.db if it is missing or stale
 # (always the case on a freshly started Space, whose disk is not persistent).

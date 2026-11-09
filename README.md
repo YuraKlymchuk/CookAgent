@@ -41,6 +41,31 @@ LLM-агент — порадник з приготування їжі (лабо
 (`data/recipes.db`, не комітиться). Мітки дієт, кухні та страви в датасеті згенеровані автоматично й
 можуть бути неточними.
 
+## Логи викликів інструментів
+
+Кожен виклик інструмента агентом пишеться в лог (логер `cookagent.agent`) з назвою, аргументами,
+результатом і часом виконання. Також логуються початок і кінець кожної репліки (кількість запитів до
+моделі, токени, використані інструменти, id варіантів, які агент запропонував). У інтерфейс логи не
+виводяться, вони йдуть у консоль, звідки запущено `python app.py`:
+
+```
+00:38:17 cookagent.agent INFO: turn start: user='Хочу веганську вечерю до 30 хвилин без горіхів'
+00:38:18 cookagent.agent INFO: tool_call search_recipes args={"course":"main","diets":["vegan","nut_free"],"limit":5,"max_total_min":30} -> returned=5 total_matches=62 [Simple No-Cook Pizza Sauce, Pretzel Crust, ...] (215 ms)
+00:38:18 cookagent.agent INFO: turn end: llm_requests=2 tokens=3252+241 tools=['search_recipes'] options=[24272, 23473, 19670]
+00:39:29 cookagent.agent INFO: tool_call get_recipe args={"recipe_id":23473} -> recipe #23473 'No-Mayo Pasta Salad' (13 ms)
+```
+
+Як показати їх під час захисту:
+
+- **Локально:** просто запустіть `python app.py` і тримайте вікно термінала поруч з браузером.
+  Щоб бачити лише виклики інструментів, відфільтруйте рядки: у PowerShell
+  `python app.py 2>&1 | Select-String "tool_call"`, у bash `python app.py 2>&1 | grep tool_call`.
+- **Зберегти в файл і дивитись у реальному часі:** `python app.py 2>&1 | Tee-Object agent.log`
+  (PowerShell) або `python app.py 2>&1 | tee agent.log` (bash).
+- **На Hugging Face Space:** вкладка **Logs** (Container logs) у вікні Space показує той самий вивід.
+- **Рівень деталізації:** змінна `LOG_LEVEL` у `.env` (`INFO` за замовчуванням, `WARNING` вимикає
+  логи викликів).
+
 ## Запуск
 
 ```bash

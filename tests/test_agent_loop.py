@@ -1,6 +1,7 @@
 import json
+import logging
 
-from agent.loop import compact_history, run_turn
+from agent.loop import compact_history, extract_option_ids, run_turn, strip_options_marker
 
 from .fakes import FakeClient, reply, tool_call
 from .recipes_fixture import titles
@@ -92,3 +93,77 @@ def test_compact_history_keeps_only_the_newest_full_recipe(toolbox):
                and not isinstance(json.loads(m["content"]), list)]
     full = [r for r in recipes if "directions" in r]
     assert [r["title"] for r in full] == ["Mushroom Soup"]
+
+
+# ---- options chosen by the agent -------------------------------------------------
+
+
+def test_extract_and_strip_options_marker():
+    text = "Ось варіанти.\n[[options: 1, 7,3]]"
+    assert extract_option_ids(text) == [1, 7, 3]
+    assert strip_options_marker(text) == "Ось варіанти."
+    assert extract_option_ids("no marker") == []
+    assert extract_option_ids("[[Options: 2, 2, 5]]") == [2, 5]
+
+
+def options_conversation(final_text):
+    return FakeClient(
+        [
+            reply(tool_calls=[tool_call("c1", "search_recipes", {"limit": 8})]),
+            reply(final_text),
+        ]
+    )
+
+
+def test_table_shows_only_the_options_the_agent_presented_in_its_order(toolbox):
+    client = options_conversation("Three ideas.\n[[options: 7, 1, 3]]")
+
+    result = run_turn(client, toolbox, [], "anything")
+
+    assert [c["id"] for c in result.candidates] == [7, 1, 3]
+    assert "[[" not in result.answer
+    assert "[[options" in result.messages[-1]["content"]  # history keeps the raw text
+
+
+def test_hallucinated_option_ids_are_dropped(toolbox):
+    result = run_turn(options_conversation("Pick.\n[[options: 2, 9999]]"), toolbox, [], "anything")
+    assert [c["id"] for c in result.candidates] == [2]
+
+
+def test_without_marker_all_results_of_the_last_search_are_shown(toolbox):
+    result = run_turn(options_conversation("Here are some."), toolbox, [], "anything")
+    assert len(result.candidates) == 8
+
+
+def test_choosing_a_recipe_leaves_no_new_candidates(toolbox):
+    client = FakeClient(
+        [reply(tool_calls=[tool_call("c1", "get_recipe", {"recipe_id": 1})]), reply("Here it is.")]
+    )
+    result = run_turn(client, toolbox, [], "show recipe 1")
+    assert result.candidates == [] and result.recipe["id"] == 1
+
+
+# ---- logging ----------------------------------------------------------------------
+
+
+def test_every_tool_call_is_logged_with_arguments_and_outcome(toolbox, caplog):
+    caplog.set_level(logging.INFO, logger="cookagent")
+
+    run_turn(scripted_conversation(), toolbox, [], "something vegan")
+
+    lines = [r.getMessage() for r in caplog.records if r.name == "cookagent.agent"]
+    calls = [line for line in lines if line.startswith("tool_call")]
+    assert len(calls) == 2
+    assert calls[0].startswith('tool_call search_recipes args={"diets": ["vegan"]} -> returned=2 total_matches=2')
+    assert "recipe #1 'Vegan Chickpea Salad'" in calls[1]
+    assert any(line.startswith("turn start") for line in lines)
+    assert any("tools=['search_recipes', 'get_recipe']" in line for line in lines)
+
+
+def test_failed_tool_call_is_logged_as_error_outcome(toolbox, caplog):
+    caplog.set_level(logging.INFO, logger="cookagent")
+    client = FakeClient([reply(tool_calls=[tool_call("c1", "get_recipe", {"recipe_id": 999})]), reply("no")])
+
+    run_turn(client, toolbox, [], "x")
+
+    assert any("-> error: Recipe 999 not found" in r.getMessage() for r in caplog.records)

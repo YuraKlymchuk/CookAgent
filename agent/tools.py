@@ -16,7 +16,7 @@ from pydantic import BaseModel, ValidationError
 from . import queries
 from .queries import DIETS, DIFFICULTIES, HEALTH_LEVELS, MAX_LIMIT, Options
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("cookagent.tools")
 
 
 class SearchArgs(BaseModel):
@@ -76,11 +76,13 @@ def build_tool_specs(options: Options) -> list[dict]:
         _function(
             "search_recipes",
             "Find recipes matching filters. Returns a random sample of matches (not all of them) "
-            "plus total_matches; narrow the filters if total_matches is large.",
+            "plus total_matches. If nothing matches, the tool relaxes criteria itself (ingredients "
+            "become a best-coverage partial match first, then taste, time, etc.; diets and excluded "
+            "ingredients never) and lists what it relaxed in `relaxed`.",
             {
                 "diets": diets,
                 "main_ingredient": _enum(options.main_ingredients, "Main ingredient group."),
-                "include_ingredients": {**words, "description": "English ingredient words that must be present, e.g. chicken, rice."},
+                "include_ingredients": {**words, "description": "English ingredient words, e.g. chicken, rice. All must be present; if no recipe has them all, best partial matches are returned."},
                 "exclude_ingredients": {**words, "description": "English words to avoid (allergens), specific ones: peanut, almond, shrimp."},
                 "cuisine": _enum(options.cuisines, "Cuisine."),
                 "course": _enum(options.courses, "Course / dish type."),
@@ -125,6 +127,10 @@ class ToolBox:
             "match_pantry": (PantryArgs, queries.match_pantry),
             "get_recipe": (RecipeArgs, queries.get_recipe),
         }
+
+    def cards(self, ids: list[int]) -> list[dict]:
+        """Look up recipe cards by id (used to show the options the agent chose to present)."""
+        return queries.cards_by_ids(self._connection, ids)
 
     def _check_choices(self, args: dict[str, Any]) -> None:
         checks = {
