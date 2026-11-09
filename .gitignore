@@ -1,0 +1,12 @@
+# Raw Kaggle export (~300 MB) - too large for GitHub/HF; keep only the slim .csv.gz
+dataset/recipes_extended.csv
+
+# Generated at start-up from dataset/recipes_slim.csv.gz
+data/
+*.db
+*.db.tmp
+
+__pycache__/
+.venv/
+.idea/
+.env
